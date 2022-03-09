@@ -1,0 +1,14 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+_targets
+_targets_r
+input
+output
+
+*.htm*
+*.yaml
+
+_targets.R
