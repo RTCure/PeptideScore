@@ -1,0 +1,271 @@
+---
+title: "PeptideScore Results"
+output:
+  html_notebook:
+    df_print: paged
+    code_folding: show
+    toc: yes
+    toc_float: yes
+    toc_depth: 4
+---
+
+# loading the packages
+
+```{r setup}
+library(targets)
+
+library(knitr)
+
+library(ggplot2)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(igraph)
+library(Radviz)
+
+theme_set(theme_light(base_size = 16))
+tar_config_set(store = "/projects/cytofResults/collaborations/RTCure/analysis/ayann/WP4/PeptideScore/_targets/")
+```
+
+# loading the data
+
+```{r data}
+tar_load(markers)
+tar_load(div.df)
+tar_load(div.groups)
+tar_load(div.clr)
+tar_load(div.svd)
+tar_load(params_alpha)
+tar_load(div.graph.gv)
+tar_load(div.graph.tsne)
+```
+
+# graph structure {.tabset}
+
+## graphviz
+
+```{r}
+plot(Radviz::rescalePlot(div.graph.gv,0.6))+
+  geom_point(aes(col=Community))
+```
+
+## *t*-SNE
+
+```{r}
+bind_cols(div.df %>% 
+            ungroup() %>% 
+            mutate(Community = factor(membership(div.groups)[id])),
+          as_tibble(div.graph.tsne$Y,
+                    .name_repair = "universal",
+                    quiet = TRUE) %>% 
+            rename(tx = `...1`,
+                   ty = `...2`)) %>% 
+  ggplot(aes(x = tx,
+             y =ty))+
+  geom_point(aes(color=Community))
+```
+
+# community to treatment {.tabset}
+
+## linechart
+
+```{r}
+div.df %>% 
+  ungroup() %>% 
+  mutate(Community = factor(membership(div.groups)[id])) %>% 
+  count(Community,Treatment) %>% 
+  group_by(Treatment) %>% 
+  mutate(pc = n/sum(n)) %>% 
+  ggplot(aes(x = Community,
+             y = pc))+
+  geom_line(aes(group = Treatment),
+            color = "grey80")+
+  geom_point(aes(color = Treatment),
+             size = 3)+
+  scale_y_continuous(labels = scales::percent_format())
+```
+
+## stacked barplot
+
+```{r}
+div.df %>% 
+  ungroup() %>% 
+  mutate(Community = factor(membership(div.groups)[id])) %>% 
+  count(Community,Treatment) %>% 
+  group_by(Treatment) %>% 
+  mutate(pc = n/sum(n)) %>% 
+  ggplot(aes(x=Treatment, y=pc, fill=Community)) +
+  geom_bar(stat="identity")+
+  theme(axis.text.x=element_text(angle=45,hjust=1))
+```
+
+# patient-level community per treatment {.tabset}
+
+```{r, results="asis"}
+ksink <- lapply(levels(div.df$Treatment),function(cur.cond) {
+  cat("##",cur.cond,"\n\n")
+  cur.plot <- div.clr %>% 
+    filter(Treatment==cur.cond)%>%
+    group_by(Individual) %>% 
+    mutate(pc = n/sum(n)) %>% 
+    ggplot(aes(x = Community,
+               y = pc))+
+    geom_line(aes(group = Individual),
+              color = "grey80")+
+    geom_point(aes(color = Individual),
+               size = 3)+
+    scale_y_continuous(labels = scales::percent_format())
+  print(cur.plot)
+  cat("\n\n")
+})
+```
+
+# community composition {.tabset}
+
+First we need to summarize the data by community & patient:
+
+```{r}
+div.summ <- div.df %>% 
+  ungroup() %>% 
+  mutate(Community = factor(membership(div.groups)[id])) %>% 
+  group_by(Community,Individual) %>% 
+  summarise_at(vars(one_of(with(markers,desc[type=="functional"]))),
+               median) %>% 
+  gather("Channel","value",
+         one_of(with(markers,desc[type=="functional"]))) %>% 
+  left_join(div.clr %>%
+              filter(Treatment!="CD3") %>%
+              group_by(Individual) %>%
+              summarize(n = sum(n),
+                        .groups = "drop_last") %>%
+              distinct(Individual, n) %>%
+              mutate(ref = median(n),
+                     n_gauss = exp((2*ref^2)/-n^2)),
+            by = "Individual")
+```
+
+For patient-level data, the points are sized after the number of cells detected in each patient.
+
+## overall
+
+```{r}
+div.df %>% 
+  ungroup() %>% 
+  mutate(Community = factor(membership(div.groups)[id])) %>% 
+  group_by(Community) %>% 
+  summarise_at(vars(one_of(with(markers,desc[type=="functional"]))),
+               median) %>% 
+  gather("Channel","value",
+         one_of(with(markers,desc[type=="functional"]))) %>% 
+  ggplot(aes(x = Channel,
+             y = value))+
+  geom_line(aes(group = Community),
+            color = "grey80")+
+  geom_point(aes(color = Community),
+             size = 3)+
+  theme(axis.text.x=element_text(angle=45,hjust=1))
+```
+
+## per patient {.tabset}
+
+```{r, results="asis"}
+ksink <- lapply(levels(div.summ$Community),function(cur.comm) {
+  cat("###",cur.comm,"\n\n")
+  cur.plot <- div.summ %>% 
+    filter(Community==cur.comm) %>% 
+    ggplot(aes(x = Channel,
+               y = value))+
+    geom_line(aes(group = Individual),
+              color = "grey80")+
+    geom_point(aes(color = Individual,
+                   size = n_gauss))+
+    scale_size_area()+
+    guides(size = "none")+
+    theme(axis.text.x=element_text(angle=45,hjust=1))
+  print(cur.plot)
+  cat("\n\n")
+})
+```
+
+# biplots
+
+Biplots are generated after [Aitchinson and Greenacre (2002)](https://doi.org/10.1111/1467-9876.00275) using `alpha`=`r params_alpha`.
+
+## overall
+
+```{r}
+ggplot()+
+  geom_segment(data = div.svd[["bip_G"]],
+               aes(x = 0,
+                   y = 0,
+                   xend = x,
+                   yend = y))+
+  geom_text(data = div.svd[["bip_G"]],
+            aes(x = x,
+                y = y,
+                label = Community),
+            color = "blue2")+
+  geom_point(data = div.svd[["bip_F"]],
+             aes(x = x,
+                 y = y,
+                 color = Treatment),
+             size = 3)+
+  scale_x_continuous(expand = c(0,0.5))
+```
+
+## treatment {.tabset}
+
+```{r, results="asis"}
+ksink <- lapply(levels(div.df$Treatment),function(cur.cond) {
+  cat("###",cur.cond,"\n\n")
+  cur.plot <- ggplot()+
+    geom_segment(data = div.svd[["bip_G"]],
+                 aes(x = 0,
+                     y = 0,
+                     xend = x,
+                     yend = y))+
+    geom_text(data = div.svd[["bip_G"]],
+              aes(x = x,
+                  y = y,
+                  label = Community),
+              color = "blue2")+
+    geom_point(data = div.svd[["bip_F"]] %>% 
+                 filter(Treatment==cur.cond),
+               aes(x = x,
+                   y = y,
+                   color = Individual),
+               size = 3)+
+    scale_x_continuous(expand = c(0,0.5))
+  print(cur.plot)
+  cat("\n\n")
+})
+```
+
+## individuals {.tabset}
+
+```{r, results="asis"}
+ksink <- lapply(levels(div.df$Individual),function(cur.patient) {
+  cat("###",cur.patient,"\n\n")
+  cur.plot <- ggplot()+
+    geom_segment(data = div.svd[["bip_G"]],
+                 aes(x = 0,
+                     y = 0,
+                     xend = x,
+                     yend = y))+
+    geom_text(data = div.svd[["bip_G"]],
+              aes(x = x,
+                  y = y,
+                  label = Community),
+              color = "blue2")+
+    geom_point(data = div.svd[["bip_F"]] %>% 
+                 filter(Individual==cur.patient),
+               aes(x = x,
+                   y = y,
+                   color = Treatment),
+               size = 3)+
+    scale_x_continuous(expand = c(0,0.5))
+  print(cur.plot)
+  cat("\n\n")
+})
+```
+
