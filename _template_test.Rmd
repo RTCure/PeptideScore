@@ -347,6 +347,11 @@ tar_target(div.graph,{
                   weighted = TRUE)
 })
 ```
+(because the previous target was not interactive we need to load the graph manually once it is available)
+
+```{r load_graph}
+tar_noninteractive(tar_load(div.graph))
+```
 
 And finally extract the communities:
 
