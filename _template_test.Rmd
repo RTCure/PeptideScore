@@ -21,6 +21,7 @@ library(tibble)
 library(dplyr)
 library(tidyr)
 library(stringr)
+library(forcats)
 library(ggplot2)
 
 library(tarchetypes)
@@ -76,6 +77,7 @@ Specify the name of the `GatingSet` :
 ```
 
 We can now load and parse the FlowJo workspace and save it to the file system:
+
 ```{targets gs.file, tar_interactive=FALSE}
 tar_target(gs.file,{
   unlink(file.path(output.dir,gs.id),
