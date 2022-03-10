@@ -50,11 +50,9 @@ tar_option_set(packages = c("flowCore","flowWorkspace",
 
 this is a first go at a reproducible and shareable pipeline for PeptideScoe - not everything is settled yet!
 
-the pipeline is broken down into 4 stages
+the pipeline is broken down into multiple stages that need to be run one after the other.
 
-# Stage 1 - Loading the data
-
-## load the `GatingSet` from FlowJo
+# Stage 1 - parsing the FlowJo workspace into a `GatingSet`
 
 Specify the path to the FlowJo workspace that will be used :
 
@@ -89,15 +87,16 @@ tar_target(gs.file,{
   file.path(output.dir,gs.id)
 })
 ```
-
-## Preparing annotations
+# Stage 2 - Preparing annotations
 
 ```{r load_gs_interactive}
 tar_noninteractive(tar_load(gs.file))
 gset <- load_gs(gs.file)
 ```
 
-We start with sample annotation:
+## Sample annotation
+
+Test sample annotation in the following chunk:
 
 ```{r prepare_samples}
 pData(gset) %>%
@@ -131,8 +130,9 @@ gset <- load_gs(gs.file)
 rownames(.annots) <- .annots$name
 .annots
 ```
+## Marker annotation
 
-Next we prepare for marker annotation; the following table shows a list of markers present in the dataset:
+The following table shows a list of markers present in the dataset:
 
 ```{r}
 as_tibble(pData(parameters(flowData(gset)[[1]])),
@@ -164,6 +164,8 @@ tar_target(markers,{
            isTransformed  = name %in% names(getTransformations(gset[[1]])))
 })
 ```
+
+## Populations
 
 The next block lists available populations:
 
@@ -226,15 +228,16 @@ tar_target(div.df,{
                          filter(Treatment!="CD3"))
 })
 ```
+The result is shown below:
 
 ```{r show_df}
 tar_noninteractive(tar_load(div.df))
 div.df
 ```
 
-# Stage 2 - Computing distance
+# Stage 3 - Computing distance
 
-Using all functional markers in the dataset we compute the cosine similarity beteween all cells:
+Using all functional markers in the dataset we compute the cosine similarity between all cells:
 
 ```{targets div.dist, tar_interactive=FALSE}
 tar_target(div.dist,{
@@ -261,9 +264,7 @@ tar_target(div.rank,{
   })
 ```
 
-# Stage 3 - Preparing the graph
-
-## Find optimal *k*
+# Stage 4 - Find optimal *k*
 
 To identify the optimal *k* we suggest starting from the square root of the number of cells, then exploring a number of critical value around that one.
 
@@ -325,7 +326,9 @@ mods %>%
                 size = Gini))
 ```
 
-## Compute graph
+# Stage 5 - Compute the graph
+
+## Specify *k* and create the kNN graph
 
 We define the optimal k as a parameter in the following block:
 
@@ -347,6 +350,7 @@ tar_target(div.graph,{
                   weighted = TRUE)
 })
 ```
+
 (because the previous target was not interactive we need to load the graph manually once it is available)
 
 ```{r load_graph}
@@ -415,7 +419,7 @@ tar_target(div.graph.gv,{
 })
 ```
 
-# Stage 4 - exploratory analysis
+# Stage 6 - exploratory analysis
 
 ## Community size
 
