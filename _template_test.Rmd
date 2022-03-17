@@ -48,7 +48,7 @@ tar_option_set(packages = c("flowCore","flowWorkspace",
 
 # Goal
 
-this is a first go at a reproducible and shareable pipeline for PeptideScoe - not everything is settled yet!
+this is a first go at a reproducible and shareable pipeline for PeptideScore - not everything is settled yet!
 
 the pipeline is broken down into multiple stages that need to be run one after the other.
 
@@ -87,6 +87,7 @@ tar_target(gs.file,{
   file.path(output.dir,gs.id)
 })
 ```
+
 # Stage 2 - Preparing annotations
 
 ```{r load_gs_interactive}
