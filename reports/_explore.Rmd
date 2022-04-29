@@ -45,8 +45,13 @@ tar_load(div.graph.tsne)
 ## graphviz
 
 ```{r}
+community.cols <- setNames(
+  scales::hue_pal()(length(div.groups)),
+  seq(length(div.groups))
+)
 plot(Radviz::rescalePlot(div.graph.gv,0.6))+
-  geom_point(aes(col=Community))
+  geom_point(aes(color = Community))+
+  scale_color_manual(values = community.cols)
 ```
 
 ## *t*-SNE
@@ -62,7 +67,8 @@ bind_cols(div.df %>%
                    ty = `...2`)) %>% 
   ggplot(aes(x = tx,
              y =ty))+
-  geom_point(aes(color=Community))
+  geom_point(aes(color = Community))+
+  scale_color_manual(values = community.cols)
 ```
 
 # community to treatment {.tabset}
@@ -168,6 +174,7 @@ div.df %>%
             color = "grey80")+
   geom_point(aes(color = Community),
              size = 3)+
+  scale_color_manual(values = community.cols)+
   theme(axis.text.x=element_text(angle=45,hjust=1))
 ```
 
