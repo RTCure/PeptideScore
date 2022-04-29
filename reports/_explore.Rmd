@@ -102,6 +102,10 @@ div.df %>%
 # patient-level community per treatment {.tabset}
 
 ```{r, results="asis"}
+patient.cols <- setNames(
+  scales::hue_pal()(nlevels(div.df$Individual)),
+  levels(div.df$Individual)
+)
 ksink <- lapply(levels(div.df$Treatment),function(cur.cond) {
   cat("##",cur.cond,"\n\n")
   cur.plot <- div.clr %>% 
@@ -114,6 +118,7 @@ ksink <- lapply(levels(div.df$Treatment),function(cur.cond) {
               color = "grey80")+
     geom_point(aes(color = Individual),
                size = 3)+
+    scale_color_manual(values = patient.cols)+
     scale_y_continuous(labels = scales::percent_format())
   print(cur.plot)
   cat("\n\n")
