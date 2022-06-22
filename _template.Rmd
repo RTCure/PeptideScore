@@ -24,6 +24,8 @@ library(stringr)
 library(forcats)
 library(ggplot2)
 
+library(kohonen)
+
 library(tarchetypes)
 
 knitr::opts_chunk$set(warning=FALSE,
@@ -44,6 +46,15 @@ tar_option_set(packages = c("flowCore","flowWorkspace",
                             "dplyr","tidyr","stringr","forcats","tibble",
                             "ggplot2","Rtsne","Radviz",
                             "igraph","rmarkdown"))
+## functions
+do.som.hash <- function(mat,k,B,sgrid) {
+  .train.mat <- mat[sample(B),]
+  .model <- som(.train.mat, 
+                grid = sgrid)
+  .hs <- predict(object = .model,
+                 newdata = mat)[["unit.classif"]]
+  return(.hs)
+}
 ```
 
 # Goal
@@ -211,6 +222,7 @@ tar_target(div.df,{
     mutate(id = paste0(name,seq(length(name))))
 })
 ```
+
 The result is shown below:
 
 ```{r show_df}
@@ -220,31 +232,112 @@ div.df
 
 # Stage 3 - Computing distance
 
-Using all functional markers in the dataset we compute the cosine similarity between all cells:
+Using all functional markers in the dataset we compute a hash table using **S**elf **O**rganizing **M**aps to quickly identify cells that are close to one another. We start by defining a few key parameters:
 
-```{targets div.dist, tar_interactive=FALSE}
+    - N: the total number of points
+    - B: the number of points to sample and the maximum number of points per hash
+    - k: the size of the SOM grid
+    - L: the number of hash tables
+    - K: the maximum number of nearest neighbors
+
+```{targets simhash_params}
+tar_target(simhash_params,
+           list(N = nrow(div.df),
+                B = 2000,
+                k = 2,
+                L = 6,
+                K = 250))
+```
+
+Next we compute the hash tables:
+
+```{targets hash.table}
+tar_target(hash.table,{
+  .som.grid <- somgrid(xdim = simhash_params$k, 
+                       ydim = simhash_params$k, 
+                       topo = 'hexagonal', 
+                       toroidal = T)
+  
+  .mat <- as.matrix(div.df %>% 
+                      ungroup() %>% 
+                      select(with(markers,desc[type=="functional"])))
+  
+  .hash.table <- lapply(seq(simhash_params$L),function(i){
+    ## compute first layer
+    htable <- cbind(rep(0,simhash_params$N),
+                    matrix(do.som.hash(.mat,
+                                       simhash_params$k,
+                                       simhash_params$B,
+                                       .som.grid),
+                           ncol=1))
+    hs <- rowSums(sweep(htable,2,(1+simhash_params$k^2)^seq(0,ncol(htable)-1),'*'))
+    hss <- table(hs)
+    
+    ## compute extra layers until all contain less than B cells
+    while(any(hss>simhash_params$B)) {
+      for(i in as.numeric(names(which(hss>simhash_params$B)))) {
+        htable[hs==i,1] <- do.som.hash(.mat[hs==i,],
+                                       simhash_params$k,
+                                       simhash_params$B,
+                                       .som.grid)
+      }
+      hs <- rowSums(sweep(htable,2,(1+simhash_params$k^2)^seq(0,ncol(htable)-1),'*'))
+      hss <- table(hs)
+      htable <- cbind(rep(0,simhash_params$N),
+                      htable)
+    }
+    return(hs)
+  })
+  .hash.table <- do.call(cbind,.hash.table)
+  rownames(.hash.table) <- div.df$id
+  .hash.table
+})
+```
+
+In the next step we compute similarities for all hash tables, and all buckets; the similarities are then aggregated retaining only the largest ones, and the ranks are computed on the result:
+
+```{targets div.dist}
 tar_target(div.dist,{
   .mat <- as.matrix(div.df %>% 
                       ungroup() %>% 
                       select(with(markers,desc[type=="functional"])))
   rownames(.mat) <- div.df$id
-  .mat <- t(.mat)
-  crossprod(.mat)/(sqrt(tcrossprod(colSums(.mat^2))))
-})
-```
-
-Next we generate a rank matrix based on the distance matrix:
-
-```{targets div.rank, tar_interactive=FALSE}
-tar_target(div.rank,{
-    .div.rank <- div.dist
-    
-    diag(.div.rank) <- 0
-    
-    .div.rank <- apply(.div.rank,1,rank,ties.method = "first")
-    .div.rank <- nrow(div.dist)+1-.div.rank
-    t(.div.rank)
+  
+  .div.dist <- lapply(seq(simhash_params$L),function(cur.hash) {
+    cur.buckets <- hash.table[,cur.hash]
+    bks <- sort(unique(cur.buckets))
+    cur.neighbors <- lapply(bks,function(bk) {
+      # cat('\tbucket #',bk,'\n')
+      .ms <- .mat[which(cur.buckets==bk),]
+      .ms <- t(.ms)
+      .res <- crossprod(.ms)/(sqrt(tcrossprod(colSums(.ms^2))))
+      
+      diag(.res) <- 0 # avoid self loops
+      
+      .res.min <- apply(.res,1,rank,
+                        ties.method = "first")
+      .res.min <- nrow(.res)+1-.res.min
+      .res.min <- which(.res.min<=simhash_params$K,
+                        arr.ind = TRUE)
+      .res.min <- data.frame(from=dimnames(.res)[[2]][.res.min[,2]],
+                             to=dimnames(.res)[[1]][.res.min[,1]],
+                             weight=.res[.res.min])
+      
+      return(.res.min)
+    })
+    cur.neighbors <- bind_rows(cur.neighbors) %>%
+      mutate(Hash=cur.hash)
+    return(cur.neighbors)
   })
+  .div.dist <- bind_rows(.div.dist)
+  
+  .div.dist %>%
+    group_by(from,to) %>%
+    summarize(weight=max(weight)) %>% 
+    group_by(from) %>% 
+    mutate(rweight = length(to)+1-rank(weight,ties.method = "first")) %>% 
+    ungroup()
+})
 ```
 
 # Stage 4 - Find optimal *k*
@@ -261,11 +354,10 @@ Next we compute the corresponding graphs, and extract the communities using the 
 
 ```{targets comms, tar_interactive=FALSE}
 tar_target(comms,{
-  .adj <- div.dist
-  .adj[div.rank>ks] <- 0
-  .graph <- graph_from_adjacency_matrix(.adj,
-                                        mode = "undirected",
-                                        weighted = TRUE)
+  .adj <- div.dist %>% 
+    filter(rweight<=ks)
+  .graph <- graph_from_data_frame(.adj,
+                                  directed=FALSE)
   cluster_louvain(.graph)
 },
 pattern = map(ks)
@@ -324,13 +416,12 @@ Then build the graph accordingly:
 ```{targets div.graph, tar_interactive=FALSE}
 tar_target(div.graph,{
   ## build the adjacency matrix
-  .adj <- div.dist
-  .adj[div.rank>params_k] <- 0
+  .adj <- div.dist %>% 
+    filter(rweight<=params_k)
   
   ## build the graph
-  graph.adjacency(.adj,
-                  mode = "undirected",
-                  weighted = TRUE)
+  .graph <- graph_from_data_frame(.adj,
+                                  directed=FALSE)
 })
 ```
 
