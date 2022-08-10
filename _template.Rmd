@@ -122,6 +122,7 @@ gset <- load_gs(gs.file)
 rownames(.annots) <- .annots$name
 .annots
 ```
+
 ## Marker annotation
 
 The following table shows a list of markers present in the dataset:
