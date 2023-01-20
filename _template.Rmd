@@ -69,25 +69,27 @@ Specify the path to the FlowJo workspace that will be used :
 
 ```{targets ws.file}
 tar_target(ws.file,
-             "/path/to/flowjo.wsp",
-             format = "file")
+           "/path/to/flowjo.wsp",
+           format = "file")
 ```
 
 Specify the path where the `GatingSet` object will be stored :
 
-```{targets output.dir, tar_simple=TRUE}
-"/path/to/output/folder"
+```{targets output.dir}
+tar_target(output.dir,
+           "/path/to/output/folder")
 ```
 
 Specify the name of the `GatingSet` :
 
-```{targets gs.id, tar_simple=TRUE}
-"test_gs"
+```{targets gs.id}
+tar_target(gs.id,
+           "test_gs")
 ```
 
 We can now load and parse the FlowJo workspace and save it to the file system:
 
-```{targets gs.file, tar_interactive=FALSE}
+```{targets gs.file}
 tar_target(gs.file,{
   unlink(file.path(output.dir,gs.id),
          recursive = TRUE)
@@ -122,17 +124,20 @@ pData(gset) %>%
 
 Once sample annotation works replace it in the following code chunk:
 
-```{targets annots, tar_simple=TRUE}
-gset <- load_gs(gs.file)
-.annots <- pData(gset) %>%
-      select(`FCS Filename` = name) %>%
-      rownames_to_column("name") %>%
-      mutate(Total = str_extract(name,"_[0-9]{4,}"),
-             Total = str_replace(Total,"_",""),
-             Total = as.numeric(Total))
-rownames(.annots) <- .annots$name
-.annots
+```{targets annots}
+tar_target(annots, {
+  gset <- load_gs(gs.file)
+  .annots <- pData(gset) %>%
+    select(`FCS Filename` = name) %>%
+    rownames_to_column("name") %>%
+    mutate(Total = str_extract(name,"_[0-9]{4,}"),
+           Total = str_replace(Total,"_",""),
+           Total = as.numeric(Total))
+  rownames(.annots) <- .annots$name
+  .annots
+})
 ```
+
 ## Marker annotation
 
 The following table shows a list of markers present in the dataset:
@@ -144,8 +149,9 @@ as_tibble(pData(parameters(flowData(gset)[[1]])),
 
 In the next block we list the `desc` of markers that should be ignored:
 
-```{targets params_ref_markers, tar_simple=TRUE}
-"(LD|CD8|CFSE|GPR56|CD39)"
+```{targets params_ref_markers}
+tar_target(params_ref_markers,
+           "(LD|CD8|CFSE|GPR56|CD39)")
 ```
 
 The next block builds marker annotation:
@@ -195,8 +201,9 @@ ksink <- lapply(colnames(pops),function(x) cat("\t*",x,"\n"))
 
 In the next block you can specify which population corresponds to the data you want to analyze:
 
-```{targets cur.pop, tar_simple=TRUE}
-"/path/to/population"
+```{targets cur.pop}
+tar_target(cur.pop,
+           "/path/to/population")
 ```
 
 ## Extract intensity matrix
@@ -346,8 +353,9 @@ To identify the optimal *k* we suggest starting from the square root of the numb
 
 We start by specifying a range of *k* values to test:
 
-```{targets ks, tar_simple=TRUE}
-seq(100,200,by = 25)
+```{targets ks}
+tar_target(ks,
+           seq(100,200,by = 25))
 ```
 
 Next we compute the corresponding graphs, and extract the communities using the Louvain algorithm
@@ -407,8 +415,9 @@ mods %>%
 
 We define the optimal k as a parameter in the following block:
 
-```{targets params_k, tar_simple=TRUE}
-150
+```{targets params_k}
+tar_target(params_k,
+           150)
 ```
 
 Then build the graph accordingly:
@@ -433,8 +442,9 @@ tar_noninteractive(tar_load(div.graph))
 
 And finally extract the communities:
 
-```{targets div.groups, tar_simple=TRUE}
-cluster_louvain(div.graph)
+```{targets div.groups}
+tar_target(div.groups,
+           cluster_louvain(div.graph))
 ```
 
 ## Compute projections
@@ -499,8 +509,9 @@ tar_target(div.graph.gv,{
 
 To compute the community size per sample, we start by specifying the variables of interest that should be used for the grouping:
 
-```{targets params_vars, tar_simple=TRUE}
-c("Treatment","Individual")
+```{targets params_vars}
+tar_target(params_vars,
+           c("Treatment","Individual"))
 ```
 
 Next we compute the community size and transform it into a *clr* value:
@@ -533,8 +544,9 @@ tar_target(div.clr,{
 
 To compute a biplot representation of the community contributions per sample, we first set the alpha parameters, which describes the relative contribution of features and samples to the projection; use 1 to focus on features, 0 to focus on samples:
 
-```{targets params_alpha, tar_simple=TRUE}
-0.5
+```{targets params_alpha}
+tar_target(params_alpha,
+           0.5)
 ```
 
 We can then compute the `svd` representation of the *clr* matrix:
