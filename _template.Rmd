@@ -24,6 +24,8 @@ library(stringr)
 library(forcats)
 library(ggplot2)
 
+library(kohonen)
+
 library(tarchetypes)
 
 knitr::opts_chunk$set(warning=FALSE,
@@ -44,6 +46,15 @@ tar_option_set(packages = c("flowCore","flowWorkspace",
                             "dplyr","tidyr","stringr","forcats","tibble",
                             "ggplot2","Rtsne","Radviz",
                             "igraph","rmarkdown"))
+## functions
+do.som.hash <- function(mat,k,B,sgrid) {
+  .train.mat <- mat[sample(B),]
+  .model <- som(.train.mat, 
+                grid = sgrid)
+  .hs <- predict(object = .model,
+                 newdata = mat)[["unit.classif"]]
+  return(.hs)
+}
 ```
 
 # Goal
@@ -58,25 +69,27 @@ Specify the path to the FlowJo workspace that will be used :
 
 ```{targets ws.file}
 tar_target(ws.file,
-             "/path/to/flowjo.wsp",
-             format = "file")
+           "/path/to/flowjo.wsp",
+           format = "file")
 ```
 
 Specify the path where the `GatingSet` object will be stored :
 
-```{targets output.dir, tar_simple=TRUE}
-"/path/to/output/folder"
+```{targets output.dir}
+tar_target(output.dir,
+           "/path/to/output/folder")
 ```
 
 Specify the name of the `GatingSet` :
 
-```{targets gs.id, tar_simple=TRUE}
-"test_gs"
+```{targets gs.id}
+tar_target(gs.id,
+           "test_gs")
 ```
 
 We can now load and parse the FlowJo workspace and save it to the file system:
 
-```{targets gs.file, tar_interactive=FALSE}
+```{targets gs.file}
 tar_target(gs.file,{
   unlink(file.path(output.dir,gs.id),
          recursive = TRUE)
@@ -111,16 +124,18 @@ pData(gset) %>%
 
 Once sample annotation works replace it in the following code chunk:
 
-```{targets annots, tar_simple=TRUE}
-gset <- load_gs(gs.file)
-.annots <- pData(gset) %>%
-      select(`FCS Filename` = name) %>%
-      rownames_to_column("name") %>%
-      mutate(Total = str_extract(name,"_[0-9]{4,}"),
-             Total = str_replace(Total,"_",""),
-             Total = as.numeric(Total))
-rownames(.annots) <- .annots$name
-.annots
+```{targets annots}
+tar_target(annots, {
+  gset <- load_gs(gs.file)
+  .annots <- pData(gset) %>%
+    select(`FCS Filename` = name) %>%
+    rownames_to_column("name") %>%
+    mutate(Total = str_extract(name,"_[0-9]{4,}"),
+           Total = str_replace(Total,"_",""),
+           Total = as.numeric(Total))
+  rownames(.annots) <- .annots$name
+  .annots
+})
 ```
 
 ## Marker annotation
@@ -134,8 +149,9 @@ as_tibble(pData(parameters(flowData(gset)[[1]])),
 
 In the next block we list the `desc` of markers that should be ignored:
 
-```{targets params_ref_markers, tar_simple=TRUE}
-"(LD|CD8|CFSE|GPR56|CD39)"
+```{targets params_ref_markers}
+tar_target(params_ref_markers,
+           "(LD|CD8|CFSE|GPR56|CD39)")
 ```
 
 The next block builds marker annotation:
@@ -185,8 +201,9 @@ ksink <- lapply(colnames(pops),function(x) cat("\t*",x,"\n"))
 
 In the next block you can specify which population corresponds to the data you want to analyze:
 
-```{targets cur.pop, tar_simple=TRUE}
-"/path/to/population"
+```{targets cur.pop}
+tar_target(cur.pop,
+           "/path/to/population")
 ```
 
 ## Extract intensity matrix
@@ -212,6 +229,7 @@ tar_target(div.df,{
     mutate(id = paste0(name,seq(length(name))))
 })
 ```
+
 The result is shown below:
 
 ```{r show_df}
@@ -221,31 +239,112 @@ div.df
 
 # Stage 3 - Computing distance
 
-Using all functional markers in the dataset we compute the cosine similarity between all cells:
+Using all functional markers in the dataset we compute a hash table using **S**elf **O**rganizing **M**aps to quickly identify cells that are close to one another. We start by defining a few key parameters:
 
-```{targets div.dist, tar_interactive=FALSE}
+    - N: the total number of points
+    - B: the number of points to sample and the maximum number of points per hash
+    - k: the size of the SOM grid
+    - L: the number of hash tables
+    - K: the maximum number of nearest neighbors
+
+```{targets simhash_params}
+tar_target(simhash_params,
+           list(N = nrow(div.df),
+                B = 2000,
+                k = 2,
+                L = 6,
+                K = 250))
+```
+
+Next we compute the hash tables:
+
+```{targets hash.table}
+tar_target(hash.table,{
+  .som.grid <- somgrid(xdim = simhash_params$k, 
+                       ydim = simhash_params$k, 
+                       topo = 'hexagonal', 
+                       toroidal = T)
+  
+  .mat <- as.matrix(div.df %>% 
+                      ungroup() %>% 
+                      select(with(markers,desc[type=="functional"])))
+  
+  .hash.table <- lapply(seq(simhash_params$L),function(i){
+    ## compute first layer
+    htable <- cbind(rep(0,simhash_params$N),
+                    matrix(do.som.hash(.mat,
+                                       simhash_params$k,
+                                       simhash_params$B,
+                                       .som.grid),
+                           ncol=1))
+    hs <- rowSums(sweep(htable,2,(1+simhash_params$k^2)^seq(0,ncol(htable)-1),'*'))
+    hss <- table(hs)
+    
+    ## compute extra layers until all contain less than B cells
+    while(any(hss>simhash_params$B)) {
+      for(i in as.numeric(names(which(hss>simhash_params$B)))) {
+        htable[hs==i,1] <- do.som.hash(.mat[hs==i,],
+                                       simhash_params$k,
+                                       simhash_params$B,
+                                       .som.grid)
+      }
+      hs <- rowSums(sweep(htable,2,(1+simhash_params$k^2)^seq(0,ncol(htable)-1),'*'))
+      hss <- table(hs)
+      htable <- cbind(rep(0,simhash_params$N),
+                      htable)
+    }
+    return(hs)
+  })
+  .hash.table <- do.call(cbind,.hash.table)
+  rownames(.hash.table) <- div.df$id
+  .hash.table
+})
+```
+
+In the next step we compute similarities for all hash tables, and all buckets; the similarities are then aggregated retaining only the largest ones, and the ranks are computed on the result:
+
+```{targets div.dist}
 tar_target(div.dist,{
   .mat <- as.matrix(div.df %>% 
                       ungroup() %>% 
                       select(with(markers,desc[type=="functional"])))
   rownames(.mat) <- div.df$id
-  .mat <- t(.mat)
-  crossprod(.mat)/(sqrt(tcrossprod(colSums(.mat^2))))
-})
-```
-
-Next we generate a rank matrix based on the distance matrix:
-
-```{targets div.rank, tar_interactive=FALSE}
-tar_target(div.rank,{
-    .div.rank <- div.dist
-    
-    diag(.div.rank) <- 0
-    
-    .div.rank <- apply(.div.rank,1,rank,ties.method = "first")
-    .div.rank <- nrow(div.dist)+1-.div.rank
-    t(.div.rank)
+  
+  .div.dist <- lapply(seq(simhash_params$L),function(cur.hash) {
+    cur.buckets <- hash.table[,cur.hash]
+    bks <- sort(unique(cur.buckets))
+    cur.neighbors <- lapply(bks,function(bk) {
+      # cat('\tbucket #',bk,'\n')
+      .ms <- .mat[which(cur.buckets==bk),]
+      .ms <- t(.ms)
+      .res <- crossprod(.ms)/(sqrt(tcrossprod(colSums(.ms^2))))
+      
+      diag(.res) <- 0 # avoid self loops
+      
+      .res.min <- apply(.res,1,rank,
+                        ties.method = "first")
+      .res.min <- nrow(.res)+1-.res.min
+      .res.min <- which(.res.min<=simhash_params$K,
+                        arr.ind = TRUE)
+      .res.min <- data.frame(from=dimnames(.res)[[2]][.res.min[,2]],
+                             to=dimnames(.res)[[1]][.res.min[,1]],
+                             weight=.res[.res.min])
+      
+      return(.res.min)
+    })
+    cur.neighbors <- bind_rows(cur.neighbors) %>%
+      mutate(Hash=cur.hash)
+    return(cur.neighbors)
   })
+  .div.dist <- bind_rows(.div.dist)
+  
+  .div.dist %>%
+    group_by(from,to) %>%
+    summarize(weight=max(weight)) %>% 
+    group_by(from) %>% 
+    mutate(rweight = length(to)+1-rank(weight,ties.method = "first")) %>% 
+    ungroup()
+})
 ```
 
 # Stage 4 - Find optimal *k*
@@ -254,19 +353,19 @@ To identify the optimal *k* we suggest starting from the square root of the numb
 
 We start by specifying a range of *k* values to test:
 
-```{targets ks, tar_simple=TRUE}
-seq(100,200,by = 25)
+```{targets ks}
+tar_target(ks,
+           seq(100,200,by = 25))
 ```
 
 Next we compute the corresponding graphs, and extract the communities using the Louvain algorithm
 
 ```{targets comms, tar_interactive=FALSE}
 tar_target(comms,{
-  .adj <- div.dist
-  .adj[div.rank>ks] <- 0
-  .graph <- graph_from_adjacency_matrix(.adj,
-                                        mode = "undirected",
-                                        weighted = TRUE)
+  .adj <- div.dist %>% 
+    filter(rweight<=ks)
+  .graph <- graph_from_data_frame(.adj,
+                                  directed=FALSE)
   cluster_louvain(.graph)
 },
 pattern = map(ks)
@@ -316,8 +415,9 @@ mods %>%
 
 We define the optimal k as a parameter in the following block:
 
-```{targets params_k, tar_simple=TRUE}
-150
+```{targets params_k}
+tar_target(params_k,
+           150)
 ```
 
 Then build the graph accordingly:
@@ -325,13 +425,12 @@ Then build the graph accordingly:
 ```{targets div.graph, tar_interactive=FALSE}
 tar_target(div.graph,{
   ## build the adjacency matrix
-  .adj <- div.dist
-  .adj[div.rank>params_k] <- 0
+  .adj <- div.dist %>% 
+    filter(rweight<=params_k)
   
   ## build the graph
-  graph.adjacency(.adj,
-                  mode = "undirected",
-                  weighted = TRUE)
+  .graph <- graph_from_data_frame(.adj,
+                                  directed=FALSE)
 })
 ```
 
@@ -343,8 +442,9 @@ tar_noninteractive(tar_load(div.graph))
 
 And finally extract the communities:
 
-```{targets div.groups, tar_simple=TRUE}
-cluster_louvain(div.graph)
+```{targets div.groups}
+tar_target(div.groups,
+           cluster_louvain(div.graph))
 ```
 
 ## Compute projections
@@ -409,8 +509,9 @@ tar_target(div.graph.gv,{
 
 To compute the community size per sample, we start by specifying the variables of interest that should be used for the grouping:
 
-```{targets params_vars, tar_simple=TRUE}
-c("Treatment","Individual")
+```{targets params_vars}
+tar_target(params_vars,
+           c("Treatment","Individual"))
 ```
 
 Next we compute the community size and transform it into a *clr* value:
@@ -443,8 +544,9 @@ tar_target(div.clr,{
 
 To compute a biplot representation of the community contributions per sample, we first set the alpha parameters, which describes the relative contribution of features and samples to the projection; use 1 to focus on features, 0 to focus on samples:
 
-```{targets params_alpha, tar_simple=TRUE}
-0.5
+```{targets params_alpha}
+tar_target(params_alpha,
+           0.5)
 ```
 
 We can then compute the `svd` representation of the *clr* matrix:
