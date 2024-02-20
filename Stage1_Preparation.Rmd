@@ -1,0 +1,147 @@
+---
+title: "Stage 1 - Preparing the data"
+author: "Kathryn Steel, Yann Abraham"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    code_folding: show
+    toc: yes
+    toc_float: yes
+    toc_depth: 4
+version: 0.1.0
+---
+
+```{r setup}
+library(targets)
+
+library(flowWorkspace)
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(ggplot2)
+
+knitr::opts_chunk$set(warning=FALSE,
+                      echo=TRUE,
+                      fig.width=8,
+                      fig.height=6,
+                      fig.retina=1,
+                      fig.keep='high',
+                      fig.align='center',
+                      knitr.table.format = "html")
+
+theme_set(theme_light(base_size = 16))
+```
+
+```{targets pipeline, tar_globals = TRUE}
+options(tidyverse.quiet = TRUE)
+tar_option_set(packages = c("flowCore","flowWorkspace",
+                            "dplyr","tidyr","stringr","forcats","tibble",
+                            "ggplot2","Rtsne","Radviz",
+                            "kohonen","igraph","rmarkdown"))
+## functions
+source("scripts/peptidescore_src.R")
+```
+
+# Goal
+
+Load & parse the data, save it & set the first few parameters.
+
+# Parse the FlowJo workspace into a `GatingSet`
+
+We start by setting a few local parameters:
+
+ - *ws.file* where to find the FlowJo file
+ - *output.dir* where to save the `GatingSet`
+ - *gs.id* the name of the `GatingSet`
+
+```{r local-parameters}
+ws.file <- "/projects/cytofResults/collaborations/RTCure/analysis/ks_files /20211025_METACIR_ROUND2/data/meta_analysis_190123.wsp"
+output.dir <- "/projects/cytofResults/collaborations/RTCure/analysis/ayann/WP4/PeptideScore/input"
+gs.id <- "test_gs"
+```
+
+Next we load the data into a `GatingSet`:
+
+```{r load-data}
+unlink(file.path(output.dir,gs.id),
+       recursive = TRUE)
+ws <- openWorkspace(ws.file)
+gs <- parseWorkspace(ws,name = "gating")
+```
+
+After loading we can list the existing populations, list the existing markers and review the available sample annotation.
+
+# Sample annotation
+
+```{r show-samples}
+pData(gs)
+```
+
+# Marker annotation
+
+```{r show-markers}
+pData(parameters(flowData(gs)[[1]]))
+```
+
+Based on this information we define the markers that will be excluded from the analysis:
+
+```{targets params_ref_markers}
+tar_target(params_ref_markers,
+           c("LD","CD8","CFSE","GPR56","CD39"))
+
+```
+
+# Populations
+
+```{r list-pops, results="asis"}
+ksink <- lapply(getNodes(gs),function(x) cat(" -",x,"\n"))
+```
+
+We start with a quick overview of the number of cells per sample per gate:
+
+```{r pop-size}
+getPopStats(gs) %>% 
+    arrange(Population,Count)
+```
+
+In the following block we manually filter for the population of interest and check the distribution of number of cells
+
+```{r pop-size-details}
+getPopStats(gs) %>% 
+  filter(Population=="New divided") %>% 
+  mutate(i = dense_rank(Count)) %>% 
+  ggplot(aes(x = i,
+             y = Count))+
+  geom_point()
+```
+
+Based on this information we can determine which population we will use and save it as a target:
+
+```{targets params_cur_pop}
+tar_target(params_cur_pop,"/Cells/Single Cells/Live cells /CD4+ T cells/New divided")
+```
+
+# Save the `GatingSet`
+
+We can now save the `GatingSet` and save the corresponding folder as a target:
+
+```{r save-gs}
+save_gs(gs,
+        file.path(output.dir,gs.id))
+cat("Copy the following value to the next `tar_target` block:\n",
+    "\t",file.path(output.dir,gs.id),"\n")
+```
+
+```{targets gs.file}
+tar_target(gs.file,
+           "/projects/cytofResults/collaborations/RTCure/analysis/ayann/WP4/PeptideScore/input/test_gs")
+```
+
+# Run the pipeline
+
+```{r}
+tar_make()
+```

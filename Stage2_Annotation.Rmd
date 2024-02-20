@@ -1,0 +1,146 @@
+---
+title: "Stage 2 - Annotating the data"
+author: "Kathryn Steel, Yann Abraham"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    code_folding: show
+    toc: yes
+    toc_float: yes
+    toc_depth: 4
+version: 0.1.0
+---
+
+```{r setup}
+library(targets)
+
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(ggplot2)
+
+knitr::opts_chunk$set(warning=FALSE,
+                      echo=TRUE,
+                      fig.width=8,
+                      fig.height=6,
+                      fig.retina=1,
+                      fig.keep='high',
+                      fig.align='center',
+                      knitr.table.format = "html")
+
+theme_set(theme_light(base_size = 16))
+```
+
+```{targets pipeline, tar_globals = TRUE}
+options(tidyverse.quiet = TRUE)
+tar_option_set(packages = c("flowCore","flowWorkspace",
+                            "dplyr","tidyr","stringr","forcats","tibble",
+                            "ggplot2","Rtsne","Radviz",
+                            "kohonen","igraph","rmarkdown"))
+## functions
+source("scripts/peptidescore_src.R")
+```
+
+# Goal
+
+In this step and based on the information collected during Stage1, we annotate samples and markers and extract the intensity matrix to support the analysis.
+
+# Sample annotation
+
+Based on the information collected in Stage1 we prepare the sample annotation target:
+
+```{targets annots}
+tar_target(annots, {
+  .gs <- load_gs(gs.file)
+  .annots <- pData(.gs) %>%
+    select(`FCS Filename` = name) %>%
+    rownames_to_column("name") %>%
+    mutate(Treatment = str_extract(`FCS Filename`,
+                                   "CEFT|CEF|TT|HEX|[RC]VIM|[RC]ENO|[RC]AGG|[RC]FIB|[RC]CILP"),
+           Individual = str_extract(`FCS Filename`,
+                                    "MET[0-9]{3}"),
+           Treatment = factor(Treatment),
+           Individual = factor(Individual),
+           Treatment = fct_relevel(Treatment,"CEF","CEFT","TT","HEX"),
+           Sample = paste0(Individual,"_",Treatment),
+           Total = str_extract(name,"_[0-9]{4,}"),
+           Total = str_replace(Total,"_",""),
+           Total = as.numeric(Total))
+  .annots
+})
+```
+
+# Marker annotation
+
+Based on the information collected in Stage1 we prepare the sample annotation target:
+
+```{targets markers}
+tar_target(markers,{
+  .gs <- load_gs(gs.file)
+  as_tibble(pData(parameters(flowData(.gs)[[1]])),
+            rownames = "id") %>% 
+    mutate(id = paste0(id,"S"),
+           type = case_when(
+             desc %in% params_ref_markers ~ "reference",
+             is.na(desc) ~ "instrument",
+             TRUE ~ "functional"
+           ),
+           desc_orig = desc,
+           desc = ifelse(is.na(desc),name,desc),
+           isTransformed  = name %in% names(getTransformations(.gs[[1]])))
+})
+```
+
+We record which marker type will be used for the remainder of the analysis:
+
+```{targets markertype}
+tar_target(markertype,"functional")
+```
+
+
+# Intensity matrix
+
+We extract the intensity matrix from the data for the gate of interest and turn the object into a tibble including annotation:
+
+```{targets div.df}
+tar_target(div.df,{
+  .gs <- load_gs(gs.file)
+  
+  .mats <- getData(.gs,params_cur_pop)
+  .mats <- fsApply(.mats,exprs,simplify = FALSE)
+  .mats <- lapply(.mats,function(mat) {
+    as_tibble(mat)%>% 
+      select(with(markers,name[type!="instrument"])) %>% 
+      rename_with(~ with(markers,desc[type!="instrument"]))
+  })
+  bind_rows(.mats,
+            .id = "name") %>% 
+    left_join(annots,
+              by = "name") %>% 
+    group_by(name) %>% 
+    mutate(id = paste0(name,seq(length(name))))
+})
+```
+
+For distance computation we extract the intensity values and turn them into a matrix with rownames corresponding to single cell identifier:
+
+```{targets div-mat}
+tar_target(div.mat,{
+  .mat <- div.df %>% 
+    ungroup() %>% 
+    select(with(markers,
+                unname(desc[type==markertype]))) %>% 
+    as.matrix()
+  rownames(.mat) <- div.df$id
+  .mat
+})
+```
+
+# Run the pipeline
+
+```{r}
+tar_make()
+```

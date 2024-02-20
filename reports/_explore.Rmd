@@ -1,5 +1,9 @@
 ---
 title: "PeptideScore Results"
+author: "Kathryn Steel, Yann Abraham"
+date: "`r Sys.Date()`"
+params:
+  cache: "/projects/cytofResults/collaborations/RTCure/analysis/ayann/WP4/PeptideScore/_targets/"
 output:
   html_notebook:
     df_print: paged
@@ -24,7 +28,7 @@ library(igraph)
 library(Radviz)
 
 theme_set(theme_light(base_size = 16))
-tar_config_set(store = "/projects/cytofResults/collaborations/RTCure/analysis/ayann/WP4/PeptideScore/_targets/")
+tar_config_set(store = params$cache)
 ```
 
 # loading the data
@@ -37,7 +41,7 @@ tar_load(div.clr)
 tar_load(div.svd)
 tar_load(params_alpha)
 tar_load(div.graph.gv)
-tar_load(div.graph.tsne)
+tar_load(div.graph.tsne.proj)
 ```
 
 # graph structure {.tabset}
@@ -57,16 +61,7 @@ plot(Radviz::rescalePlot(div.graph.gv,0.6))+
 ## *t*-SNE
 
 ```{r}
-bind_cols(div.df %>% 
-            ungroup() %>% 
-            mutate(Community = factor(membership(div.groups)[id])),
-          as_tibble(div.graph.tsne$Y,
-                    .name_repair = "universal",
-                    quiet = TRUE) %>% 
-            rename(tx = `...1`,
-                   ty = `...2`)) %>% 
-  ggplot(aes(x = tx,
-             y =ty))+
+div.graph.tsne.proj+
   geom_point(aes(color = Community))+
   scale_color_manual(values = community.cols)
 ```

@@ -1,0 +1,105 @@
+---
+title: "Stage 3 - Computing the distance"
+author: "Kathryn Steel, Yann Abraham"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    code_folding: show
+    toc: yes
+    toc_float: yes
+    toc_depth: 4
+version: 0.1.0
+---
+
+```{r setup}
+library(targets)
+
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(ggplot2)
+
+knitr::opts_chunk$set(warning=FALSE,
+                      echo=TRUE,
+                      fig.width=8,
+                      fig.height=6,
+                      fig.retina=1,
+                      fig.keep='high',
+                      fig.align='center',
+                      knitr.table.format = "html")
+
+theme_set(theme_light(base_size = 16))
+```
+
+```{targets pipeline, tar_globals = TRUE}
+options(tidyverse.quiet = TRUE)
+tar_option_set(packages = c("flowCore","flowWorkspace",
+                            "dplyr","tidyr","stringr","forcats","tibble",
+                            "ggplot2","Rtsne","Radviz",
+                            "kohonen","igraph","rmarkdown"))
+
+## functions
+source("scripts/peptidescore_src.R")
+```
+
+# Goal
+
+Now that the data is loaded we start by computing distance between cells using a greedy approach: rather than computing all distances, including ones that would be irrelevant to the construction of the graph later on, we use a hash table to compute distances only between close neighbors
+
+# Parameters
+
+The distance computation uses all markers of type **functional** in the dataset; to efficiently compute a hash table we use **S**elf **O**rganizing **M**aps to quickly identify cells that are close to one another. We start by defining a few key parameters:
+
+    - N: the total number of points
+    - B: the number of points to sample and the maximum number of points per hash
+    - k: the size of the SOM grid
+    - L: the number of hash tables
+    - K: the maximum number of nearest neighbors
+
+```{targets simhash_params}
+tar_target(simhash_params,
+           list(N = nrow(div.df),
+                B = 2000,
+                k = 2,
+                L = 6,
+                K = 250))
+```
+
+# Distance estimation
+
+First we compute the SOM grid:
+
+```{targets som.grid}
+tar_target(som.grid,
+           somgrid(xdim = simhash_params$k, 
+                       ydim = simhash_params$k, 
+                       topo = 'hexagonal', 
+                       toroidal = T))
+```
+
+Next we compute the hash tables:
+
+```{targets hash.table}
+tar_target(hash.table,
+           do.hash.table(mat = div.mat,
+                         grid = som.grid,
+                         params = simhash_params))
+```
+
+In the next step we compute **cosine** similarities for all hash tables, and all buckets; the similarities are then aggregated retaining only the largest ones, and the ranks are computed on the result:
+
+```{targets div.dist}
+tar_target(div.dist,
+           do.hash.dist(mat = div.mat,
+                        htable = hash.table,
+                        params = simhash_params))
+```
+
+# Run the pipeline
+
+```{r}
+tar_make()
+```

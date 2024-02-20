@@ -1,0 +1,152 @@
+---
+title: "Stage 5 - Build the graph"
+author: "Kathryn Steel, Yann Abraham"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    code_folding: show
+    toc: yes
+    toc_float: yes
+    toc_depth: 4
+version: 0.1.0
+---
+
+```{r setup}
+library(targets)
+
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(ggplot2)
+
+knitr::opts_chunk$set(warning=FALSE,
+                      echo=TRUE,
+                      fig.width=8,
+                      fig.height=6,
+                      fig.retina=1,
+                      fig.keep='high',
+                      fig.align='center',
+                      knitr.table.format = "html")
+
+theme_set(theme_light(base_size = 16))
+```
+
+```{targets pipeline, tar_globals = TRUE}
+options(tidyverse.quiet = TRUE)
+tar_option_set(packages = c("flowCore","flowWorkspace",
+                            "dplyr","tidyr","stringr","forcats","tibble",
+                            "ggplot2","Rtsne","Radviz",
+                            "kohonen","igraph","rmarkdown"))
+
+## functions
+source("scripts/peptidescore_src.R")
+```
+
+# Goal
+
+Based on our estimation of the optimal *k* value we model the data as a graph and compute a few projections.
+
+# Specify *k* and create the kNN graph
+
+We define the optimal k as a parameter in the following block:
+
+```{targets params_k}
+tar_target(params_k,150)
+```
+
+Then build the graph accordingly:
+
+```{targets div.graph, tar_interactive=FALSE}
+tar_target(div.graph,{
+  ## build the adjacency matrix
+  .adj <- div.dist %>% 
+    filter(rweight<=params_k)
+  
+  ## build the graph
+  graph_from_data_frame(.adj,
+                        directed=FALSE)
+})
+```
+
+And finally extract the communities:
+
+```{targets div.groups, tar_interactive=FALSE}
+tar_target(div.groups,
+           cluster_louvain(div.graph))
+```
+
+# Compute projections
+
+## *t*-SNE
+
+Rather than creating a projection based on the features, we will create a projection based on the geodesic distance between cells:
+
+```{targets div.graph.dist, tar_interactive=FALSE}
+tar_target(div.graph.dist,
+           distances(div.graph,
+                     weights = NA))
+```
+
+We can then use *t*-SNE to project the graph:
+
+```{targets div.graph.tsne, tar_interactive=FALSE}
+tar_target(div.graph.tsne,
+           Rtsne(as.dist(div.graph.dist), 
+                 perplexity=50, 
+                 check_duplicates = FALSE,
+                 is_distance = TRUE))
+```
+
+And turn the results into a `ggplot2` object:
+
+```{targets div.graph.tsne.proj}
+tar_target(div.graph.tsne.proj,{
+  as_tibble(div.graph.tsne$Y,
+          .name_repair = "universal",
+          quiet = TRUE) %>% 
+  rename(tx = `...1`,
+         ty = `...2`) %>% 
+  mutate(name = rownames(div.graph.dist)) %>% 
+  left_join(div.df %>% 
+              ungroup() %>% 
+              mutate(Community = factor(membership(div.groups)[id])),
+            by = c("name" = "id")) %>% 
+  ggplot(aes(x = tx,
+             y =ty))
+})
+```
+
+## Graphviz
+
+Use Graphviz to project the graph in the context of the features used to build it:
+
+```{targets gv, tar_interactive=FALSE}
+tar_target(gv,{
+  .scaled <- apply(div.mat,2,do.L)
+  .gv <- do.optimGraphviz(.scaled,
+                          graph = div.graph)
+  rownames(.gv) <- colnames(.scaled)
+  .gv
+})
+```
+
+Once channel order is optimized we can create the projection:
+
+```{targets div.graph.gv, tar_interactive=FALSE}
+tar_target(div.graph.gv,{
+  do.radviz(div.df %>% 
+              ungroup() %>% 
+              mutate(Community = factor(membership(div.groups)[id])),
+            springs = gv,
+            trans = do.L)
+})
+```
+
+# Run the pipeline
+
+```{r}
+tar_make()
+```

@@ -1,0 +1,131 @@
+---
+title: "Stage 4 - Find optimal k"
+author: "Kathryn Steel, Yann Abraham"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    code_folding: show
+    toc: yes
+    toc_float: yes
+    toc_depth: 4
+version: 0.1.0
+---
+
+```{r setup}
+library(targets)
+
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(ggplot2)
+
+knitr::opts_chunk$set(warning=FALSE,
+                      echo=TRUE,
+                      fig.width=8,
+                      fig.height=6,
+                      fig.retina=1,
+                      fig.keep='high',
+                      fig.align='center',
+                      knitr.table.format = "html")
+
+theme_set(theme_light(base_size = 16))
+```
+
+```{targets pipeline, tar_globals = TRUE}
+options(tidyverse.quiet = TRUE)
+tar_option_set(packages = c("flowCore","flowWorkspace",
+                            "dplyr","tidyr","stringr","forcats","tibble",
+                            "ggplot2","Rtsne","Radviz",
+                            "kohonen","igraph","rmarkdown"))
+
+## functions
+source("scripts/peptidescore_src.R")
+```
+
+# Goal
+
+Based on the distances we computed we estimate the optimal *k* value to represent the data as a graph.
+
+# Find optimal *k*
+
+To identify the optimal *k* we suggest starting from the square root of the number of cells, then exploring a number of critical value around that one.
+
+We start by specifying a range of *k* values to test:
+
+```{targets ks}
+tar_target(ks,
+           seq(100,200,by = 25))
+```
+
+Next we compute the corresponding graphs, and extract the communities using the Louvain algorithm
+
+```{targets comms, tar_interactive=FALSE}
+tar_target(comms,{
+  .adj <- div.dist %>% 
+    filter(rweight<=ks)
+  .graph <- graph_from_data_frame(.adj,
+                                  directed=FALSE)
+  cluster_louvain(.graph)
+},
+pattern = map(ks)
+)
+```
+
+Finally we extract the following summary statistics:
+
+  * Number of communities
+  * Modularity
+  * Gini coefficient of community size
+
+```{targets mods, tar_interactive=FALSE}
+tar_target(mods,{
+  ## compute a gini coefficient for community size
+  .sizes <- sizes(comms)
+  .n <- length(.sizes)
+  
+  tibble(k = ks,
+         modularity = modularity(comms),
+         Gini = sum(outer(.sizes,
+                          .sizes,
+                          FUN=function(x,y){
+                            abs(x-y)})) / (2 * .n * sum(.sizes)),
+         N = length(comms))
+},
+pattern = map(ks,comms))
+```
+
+We visualize the different parameters in the following plot:
+
+```{targets show_modularity, tar_interactive=FALSE}
+tar_target(show.mods,{
+  mods %>% 
+    mutate(k = factor(as.numeric(k))) %>% 
+    ggplot(aes(x = N,
+               y = modularity))+
+    geom_path(size = 1.5,
+              col = "grey80")+
+    geom_text(aes(label = k,
+                  size = Gini))
+})
+```
+
+# Run the pipeline
+
+```{r}
+tar_make()
+```
+
+# Show the results
+
+```{r}
+tar_read(show.mods)
+```
+
+We select *k* as the value where:
+
+  * Number of communities is maximum
+  * Modularity is maximum
+  * Gini coefficient of community size is maximum
