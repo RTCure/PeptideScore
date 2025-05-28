@@ -54,13 +54,14 @@ Based on our estimation of the optimal *k* value we model the data as a graph an
 We define the optimal k as a parameter in the following block:
 
 ```{targets params_k}
-tar_target(params_k,150)
+tar_target(params_k,60)
 ```
 
 Then build the graph accordingly:
 
 ```{targets div.graph, tar_interactive=FALSE}
 tar_target(div.graph,{
+  library(igraph)
   ## build the adjacency matrix
   .adj <- div.dist %>% 
     filter(rweight<=params_k)
@@ -85,19 +86,23 @@ tar_target(div.groups,
 Rather than creating a projection based on the features, we will create a projection based on the geodesic distance between cells:
 
 ```{targets div.graph.dist, tar_interactive=FALSE}
-tar_target(div.graph.dist,
-           distances(div.graph,
-                     weights = NA))
+tar_target(div.graph.dist,{
+  library(igraph)
+  distances(div.graph,
+            weights = NA)
+})
 ```
 
 We can then use *t*-SNE to project the graph:
 
 ```{targets div.graph.tsne, tar_interactive=FALSE}
-tar_target(div.graph.tsne,
-           Rtsne(as.dist(div.graph.dist), 
-                 perplexity=50, 
-                 check_duplicates = FALSE,
-                 is_distance = TRUE))
+tar_target(div.graph.tsne,{
+  library(Rtsne)
+  Rtsne(as.dist(div.graph.dist), 
+        perplexity=50, 
+        check_duplicates = FALSE,
+        is_distance = TRUE)
+})
 ```
 
 And turn the results into a `ggplot2` object:
@@ -105,17 +110,17 @@ And turn the results into a `ggplot2` object:
 ```{targets div.graph.tsne.proj}
 tar_target(div.graph.tsne.proj,{
   as_tibble(div.graph.tsne$Y,
-          .name_repair = "universal",
-          quiet = TRUE) %>% 
-  rename(tx = `...1`,
-         ty = `...2`) %>% 
-  mutate(name = rownames(div.graph.dist)) %>% 
-  left_join(div.df %>% 
-              ungroup() %>% 
-              mutate(Community = factor(membership(div.groups)[id])),
-            by = c("name" = "id")) %>% 
-  ggplot(aes(x = tx,
-             y =ty))
+            .name_repair = "universal",
+            quiet = TRUE) %>% 
+    rename(tx = `...1`,
+           ty = `...2`) %>% 
+    mutate(name = rownames(div.graph.dist)) %>% 
+    left_join(div.df %>% 
+                ungroup() %>% 
+                mutate(Community = factor(membership(div.groups)[id])),
+              by = c("name" = "id")) %>% 
+    ggplot(aes(x = tx,
+               y =ty))
 })
 ```
 
@@ -125,6 +130,7 @@ Use Graphviz to project the graph in the context of the features used to build i
 
 ```{targets gv, tar_interactive=FALSE}
 tar_target(gv,{
+  library(Radviz)
   .scaled <- apply(div.mat,2,do.L)
   .gv <- do.optimGraphviz(.scaled,
                           graph = div.graph)

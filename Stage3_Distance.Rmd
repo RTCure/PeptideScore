@@ -15,12 +15,7 @@ version: 0.1.0
 ```{r setup}
 library(targets)
 
-library(tibble)
-library(dplyr)
-library(tidyr)
-library(stringr)
-library(forcats)
-library(ggplot2)
+library(tidyverse)
 
 knitr::opts_chunk$set(warning=FALSE,
                       echo=TRUE,
@@ -36,10 +31,7 @@ theme_set(theme_light(base_size = 16))
 
 ```{targets pipeline, tar_globals = TRUE}
 options(tidyverse.quiet = TRUE)
-tar_option_set(packages = c("flowCore","flowWorkspace",
-                            "dplyr","tidyr","stringr","forcats","tibble",
-                            "ggplot2","Rtsne","Radviz",
-                            "kohonen","igraph","rmarkdown"))
+tar_option_set(packages = c("tidyverse"))
 
 ## functions
 source("scripts/peptidescore_src.R")
@@ -73,11 +65,13 @@ tar_target(simhash_params,
 First we compute the SOM grid:
 
 ```{targets som.grid}
-tar_target(som.grid,
-           somgrid(xdim = simhash_params$k, 
-                       ydim = simhash_params$k, 
-                       topo = 'hexagonal', 
-                       toroidal = T))
+tar_target(som.grid,{
+  library(kohonen)
+  somgrid(xdim = simhash_params$k, 
+          ydim = simhash_params$k, 
+          topo = 'hexagonal', 
+          toroidal = T)
+})
 ```
 
 Next we compute the hash tables:

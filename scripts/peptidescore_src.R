@@ -1,6 +1,7 @@
 do.hash.table <- function(mat = div.mat,
                           grid = som.grid,
                           params = simhash_params) {
+  require(kohonen)
   do.som.hash <- function(mat,k,B,sgrid) {
     .train.mat <- mat[sample(B),]
     .model <- som(.train.mat, 

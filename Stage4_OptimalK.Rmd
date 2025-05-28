@@ -15,12 +15,7 @@ version: 0.1.0
 ```{r setup}
 library(targets)
 
-library(tibble)
-library(dplyr)
-library(tidyr)
-library(stringr)
-library(forcats)
-library(ggplot2)
+library(tidyverse)
 
 knitr::opts_chunk$set(warning=FALSE,
                       echo=TRUE,
@@ -36,10 +31,7 @@ theme_set(theme_light(base_size = 16))
 
 ```{targets pipeline, tar_globals = TRUE}
 options(tidyverse.quiet = TRUE)
-tar_option_set(packages = c("flowCore","flowWorkspace",
-                            "dplyr","tidyr","stringr","forcats","tibble",
-                            "ggplot2","Rtsne","Radviz",
-                            "kohonen","igraph","rmarkdown"))
+tar_option_set(packages = c("tidyverse"))
 
 ## functions
 source("scripts/peptidescore_src.R")
@@ -57,13 +49,14 @@ We start by specifying a range of *k* values to test:
 
 ```{targets ks}
 tar_target(ks,
-           seq(100,200,by = 25))
+           seq(30,90,by = 10))
 ```
 
 Next we compute the corresponding graphs, and extract the communities using the Louvain algorithm
 
 ```{targets comms, tar_interactive=FALSE}
 tar_target(comms,{
+  library(igraph)
   .adj <- div.dist %>% 
     filter(rweight<=ks)
   .graph <- graph_from_data_frame(.adj,

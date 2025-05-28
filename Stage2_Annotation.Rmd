@@ -15,12 +15,7 @@ version: 0.1.0
 ```{r setup}
 library(targets)
 
-library(tibble)
-library(dplyr)
-library(tidyr)
-library(stringr)
-library(forcats)
-library(ggplot2)
+library(tidyverse)
 
 knitr::opts_chunk$set(warning=FALSE,
                       echo=TRUE,
@@ -36,10 +31,7 @@ theme_set(theme_light(base_size = 16))
 
 ```{targets pipeline, tar_globals = TRUE}
 options(tidyverse.quiet = TRUE)
-tar_option_set(packages = c("flowCore","flowWorkspace",
-                            "dplyr","tidyr","stringr","forcats","tibble",
-                            "ggplot2","Rtsne","Radviz",
-                            "kohonen","igraph","rmarkdown"))
+tar_option_set(packages = c("tidyverse"))
 ## functions
 source("scripts/peptidescore_src.R")
 ```
@@ -54,21 +46,19 @@ Based on the information collected in Stage1 we prepare the sample annotation ta
 
 ```{targets annots}
 tar_target(annots, {
+  library(flowWorkspace)
   .gs <- load_gs(gs.file)
   .annots <- pData(.gs) %>%
     select(`FCS Filename` = name) %>%
     rownames_to_column("name") %>%
     mutate(Treatment = str_extract(`FCS Filename`,
-                                   "CEFT|CEF|TT|HEX|[RC]VIM|[RC]ENO|[RC]AGG|[RC]FIB|[RC]CILP"),
+                                   "CEFT|P123"),
            Individual = str_extract(`FCS Filename`,
-                                    "MET[0-9]{3}"),
+                                    "S[0-9]{2}"),
            Treatment = factor(Treatment),
            Individual = factor(Individual),
-           Treatment = fct_relevel(Treatment,"CEF","CEFT","TT","HEX"),
-           Sample = paste0(Individual,"_",Treatment),
-           Total = str_extract(name,"_[0-9]{4,}"),
-           Total = str_replace(Total,"_",""),
-           Total = as.numeric(Total))
+           Treatment = fct_relevel(Treatment,"CEFT"),
+           Sample = paste0(Individual,"_",Treatment))
   .annots
 })
 ```
@@ -79,8 +69,11 @@ Based on the information collected in Stage1 we prepare the sample annotation ta
 
 ```{targets markers}
 tar_target(markers,{
+  library(flowCore)
+  library(flowWorkspace)
   .gs <- load_gs(gs.file)
-  as_tibble(pData(parameters(flowData(.gs)[[1]])),
+  
+  as_tibble(pData(parameters(gs_cyto_data(.gs)[[1]])),
             rownames = "id") %>% 
     mutate(id = paste0(id,"S"),
            type = case_when(
@@ -100,39 +93,44 @@ We record which marker type will be used for the remainder of the analysis:
 tar_target(markertype,"functional")
 ```
 
-
 # Intensity matrix
 
 We extract the intensity matrix from the data for the gate of interest and turn the object into a tibble including annotation:
 
 ```{targets div.df}
-tar_target(div.df,{
-  .gs <- load_gs(gs.file)
-  
-  .mats <- getData(.gs,params_cur_pop)
-  .mats <- fsApply(.mats,exprs,simplify = FALSE)
-  .mats <- lapply(.mats,function(mat) {
-    as_tibble(mat)%>% 
-      select(with(markers,name[type!="instrument"])) %>% 
-      rename_with(~ with(markers,desc[type!="instrument"]))
+list(
+  tar_target(div.mats,{
+    library(flowCore)
+    library(flowWorkspace)
+    .gs <- load_gs(gs.file)
+    
+    .mats <- gs_pop_get_data(.gs,params_cur_pop)
+    fsApply(.mats,exprs,simplify = FALSE)
+  }),
+  tar_target(div.df,{
+    .mats <- lapply(div.mats,function(mat) {
+      as_tibble(mat)%>%
+        select(with(markers,name[type!="instrument"])) %>%
+        rename_with(~ with(markers,desc[type!="instrument"]))
+    })
+    bind_rows(.mats,
+              .id = "name") %>%
+      left_join(annots,
+                by = "name") %>%
+      group_by(name) %>%
+      mutate(id = paste0(name,seq(length(name))))
   })
-  bind_rows(.mats,
-            .id = "name") %>% 
-    left_join(annots,
-              by = "name") %>% 
-    group_by(name) %>% 
-    mutate(id = paste0(name,seq(length(name))))
-})
+)
 ```
 
 For distance computation we extract the intensity values and turn them into a matrix with rownames corresponding to single cell identifier:
 
 ```{targets div-mat}
 tar_target(div.mat,{
-  .mat <- div.df %>% 
-    ungroup() %>% 
+  .mat <- div.df %>%
+    ungroup() %>%
     select(with(markers,
-                unname(desc[type==markertype]))) %>% 
+                unname(desc[type==markertype]))) %>%
     as.matrix()
   rownames(.mat) <- div.df$id
   .mat

@@ -3,7 +3,7 @@ title: "PeptideScore Results"
 author: "Kathryn Steel, Yann Abraham"
 date: "`r Sys.Date()`"
 params:
-  cache: "/projects/cytofResults/collaborations/RTCure/analysis/ayann/WP4/PeptideScore/_targets/"
+  cache: "~/dev/_collabs/PeptideScore/_targets/"
 output:
   html_notebook:
     df_print: paged
@@ -20,10 +20,7 @@ library(targets)
 
 library(knitr)
 
-library(ggplot2)
-library(dplyr)
-library(stringr)
-library(tidyr)
+library(tidyverse)
 library(igraph)
 library(Radviz)
 
