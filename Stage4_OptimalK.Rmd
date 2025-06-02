@@ -49,7 +49,7 @@ We start by specifying a range of *k* values to test:
 
 ```{targets ks}
 tar_target(ks,
-           seq(30,90,by = 10))
+           seq(30,120,by = 10))
 ```
 
 Next we compute the corresponding graphs, and extract the communities using the Louvain algorithm

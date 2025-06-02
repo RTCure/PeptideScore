@@ -58,7 +58,7 @@ We start by setting a few local parameters:
 
 ```{r local-parameters}
 input.dir <- "input"
-ws.file <- "input/workspace.wsp"
+# ws.file <- "input/workspace.wsp"
 output.dir <- "output"
 gs.id <- "test_gs"
 ```

@@ -63,6 +63,13 @@ div.graph.tsne.proj+
   scale_color_manual(values = community.cols)
 ```
 
+## *t*-SNE - treatments
+
+```{r}
+div.graph.tsne.proj+
+  geom_point(aes(color = Treatment))
+```
+
 # community to treatment {.tabset}
 
 ## linechart
